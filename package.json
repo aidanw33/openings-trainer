@@ -7,13 +7,18 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "validate": "node scripts/validate.ts"
+    "validate": "node scripts/validate.ts",
+    "engine-check": "node scripts/engine-check.ts",
+    "postinstall": "node scripts/copy-engine.mjs",
+    "predev": "node scripts/copy-engine.mjs",
+    "prebuild": "node scripts/copy-engine.mjs"
   },
   "dependencies": {
     "chess.js": "^1.4.0",
     "react": "^19.3.1",
     "react-chessboard": "^5.12.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "stockfish": "^19.0.1"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",

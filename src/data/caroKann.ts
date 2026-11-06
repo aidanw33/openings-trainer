@@ -8,6 +8,11 @@ import type { Opening } from './types.ts';
  * the "why" you see after playing them; comments on White moves explain what
  * White is aiming for. Lines that share moves only need the comment written
  * once — the trainer merges positions across lines (transpositions included).
+ *
+ * Start a comment with [book] to mark a move as a deliberate theory/practical
+ * choice (e.g. a gambit or a well-established human line). `npm run engine-check`
+ * then lists it as "kept by choice" instead of flagging it, even if Stockfish
+ * slightly prefers something else.
  */
 
 export const caroKann: Opening = {
@@ -68,9 +73,7 @@ export const caroKann: Opening = {
             9.Na3 {White will regain the pawn on c4.}
             Nd5 {A beautiful square: the knight blocks the d-file and hits the e3-bishop.}
             10.Nxc4 {White recovers the pawn.}
-            Nxe3 {Grabbing the bishop pair. White's dark-squared bishop was its best defender of d4 and the dark squares.}
-            11.fxe3 {White recaptures toward the centre, but e3 is now a backward-looking pawn and the e5-pawn has less support.}
-            Be7 {Develop and castle. Black has the two bishops and targets in e5 and e3 — a pleasant position.}`,
+            Be7 {Develop and get ready to castle. Keep the knight on d5: it is a superb blockader. The tempting 10...Nxe3 11.fxe3 grabs the bishop pair, but it straightens out White's pawns and opens the f-file for White's rook, so it is better to keep the tension.}`,
         },
         {
           id: 'adv-bayonet',
@@ -134,7 +137,7 @@ export const caroKann: Opening = {
             5.Qxd3 {Queen recaptures.}
             e6 {Solid setup.}
             6.Nf3 {Natural development.}
-            Qb6 {Pressure on d4 and b2. Typical in the Advance: the queen on b6 stares at d4 along with ...c5 and ...Nc6.}
+            Qb6 {[book] Pressure on d4 and b2. Typical in the Advance: the queen on b6 stares at d4 along with ...c5 and ...Nc6.}
             7.O-O {White castles; b2 is poisoned-ish because of Qb5+/Nc3 tricks.}
             c5 {Strike at d4.}
             8.c3 {Supports d4.}
@@ -268,15 +271,15 @@ export const caroKann: Opening = {
             7.Nf4 {Hits the bishop.}
             Bd6 {Challenge the knight directly. If Nxg6 then hxg6 opens the h-file.}
             8.c3 {Supports d4 and keeps the structure.}
-            Ne7 {The knight goes to e7 so that after Nxg6 Black can recapture with the knight; it also covers d5 and f5.}
-            9.h4 {Threatening h5.}
-            h6 {Give the bishop h7.}
-            10.h5 {Gaining space.}
-            Bh7 {The bishop stays put.}
-            11.Bd3 {Offering the trade.}
-            Bxd3 {Trade the bishops.}
-            12.Nxd3 {The knight recaptures.}
-            Nd7 {Develop and prepare ...Qc7 and long or short castling. Black is solid and the h5-pawn may become weak.}`,
+            Nf6 {Natural development: the knight covers e4 and h5, and Black can castle quickly.}
+            9.h4 {Threatening h5 to trap or win the bishop.}
+            Qc7 {A useful move: the queen covers the bishop's retreat and connects with ...Nbd7 and long castling. If Nxg6 then hxg6, opening the h-file against White's h4-pawn.}
+            10.Nxg6 {White grabs the bishop pair.}
+            hxg6 {Recapture toward the centre; the h-file is now half-open and the h4-pawn is a target.}
+            11.Qf3 {The queen eyes f6 and b7.}
+            Nbd7 {Develop and protect the f6-knight.}
+            12.Bg5 {Pins the knight.}
+            c5 {Hit the centre. Black's pieces are developed and the d4-pawn is under pressure; long castling is an option.}`,
         },
         {
           id: 'cl-bc4',
@@ -325,11 +328,15 @@ export const caroKann: Opening = {
             8.O-O {White castles.}
             Be7 {Develop and cover d6/f6.}
             9.Rd1 {Pressure on the d-file.}
-            Qc7 {Get the queen off the d-file opposite the rook.}
-            10.Ng3 {Hitting the f5-bishop.}
-            Bxd3 {Trade off White's attacking bishop.}
-            11.Rxd3 {Recapture.}
-            Nf6 {Develop and castle next. Black is a clean pawn up.}`,
+            Bxe4 {Trade off White's well-placed knight. It had ideas of Neg5 hitting e6 and f7, and swapping it removes most of White's attacking chances.}
+            10.Bxe4 {White recaptures; the bishop on e4 is strong but alone.}
+            Qc7 {Now the queen leaves the d-file opposite White's rook.}
+            11.g3 {White prepares Bf4 to chase the queen.}
+            Nf6 {Develop with tempo on the e4-bishop.}
+            12.Bf4 {Hits the queen.}
+            Qc8 {The queen is safe here and covers e6 and the light squares.}
+            13.Ne5 {White centralizes.}
+            O-O {Black castles. Black is a clean pawn up with a solid position.}`,
         },
         {
           id: 'cl-nd2',
@@ -445,16 +452,18 @@ export const caroKann: Opening = {
         },
         {
           id: 'pan-bc4',
-          name: '8.Bc4 and hanging pawns',
+          name: '8.Bc4 O-O 9.O-O Nc6 10.Re1 Bf6',
           pgn: `1.e4 c6 2.d4 d5 3.exd5 cxd5 4.c4 Nf6 5.Nc3 e6 6.Nf3 Be7 7.cxd5 Nxd5
             8.Bc4 {The bishop hits d5 directly.}
             O-O {Castle first.}
             9.O-O {White castles.}
             Nc6 {Pressure on d4.}
             10.Re1 {Preparing Bd3 or Qd3 ideas.}
-            Nxc3 {Trade the knights; White gets hanging pawns.}
-            11.bxc3 {White recaptures; now c3 and d4 are "hanging pawns".}
-            b6 {Plan: ...Bb7, ...Rc8 and ...Na5 to target c4 and c3. Hanging pawns are strong when they can advance, so keep them blockaded.}`,
+            Bf6 {Pile up on the isolated d4-pawn. The bishop also defends the kingside.}
+            11.Bb3 {The bishop retreats so it can't be hit by ...Nb6 or ...Na5, and keeps eyeing d5 and e6.}
+            Nde7 {The knight steps aside to reroute to f5, adding yet another attacker on d4.}
+            12.Be3 {Defends d4.}
+            Nf5 {Now d4 is attacked four times. If White pushes d5 Black trades on e3 and the pawn becomes weak. This is the ideal plan against an IQP: blockade, trade and pressure.}`,
         },
         {
           id: 'pan-bg5',
@@ -519,9 +528,13 @@ export const caroKann: Opening = {
             10.O-O {White castles.}
             Nf6 {Develop with tempo on the queen.}
             11.Qe2 {The queen steps back.}
-            Be7 {Develop and get ready to castle.}
-            12.c3 {Solidifies d4.}
-            O-O {Black is completely solid. Plans: ...c5 to challenge d4, or ...Qd5/...Qc7 and ...Rad8 pressure on the d-file.}`,
+            Qxd4 {Grab the pawn! After 11.Qe2 nothing defends d4, and there is no trick — the queen is safe in the centre.}
+            12.Rd1 {White hits the queen to gain time.}
+            Bc5 {Develop while defending the queen. Black is a pawn up and will castle next.}
+            13.c3 {Driving the queen away.}
+            Qd6 {The queen stays active on the d-file and keeps protecting the c5-bishop.}
+            14.b4 {Hitting the bishop.}
+            Bb6 {The bishop stays on the a7-g1 diagonal aiming at f2. Black is a pawn up and can castle long or short.}`,
         },
         {
           id: 'tk-d3',
@@ -557,7 +570,7 @@ export const caroKann: Opening = {
       lines: [
         {
           id: 'fan-nc3',
-          name: '3...e6 4.Nc3 Bb4',
+          name: '3...e6 4.Nc3 Bb4 5.a3: punishing 7.fxe4',
           pgn: `1.e4 c6 2.d4 d5
             3.f3 {The Fantasy Variation: supports e4 with a pawn so White can keep a big centre.}
             e6 {Solid and flexible: opens the f8-bishop toward b4, and the f3-pawn means White can't use the f3 square for the knight.}
@@ -567,14 +580,29 @@ export const caroKann: Opening = {
             Bxc3+ {Trade, doubling White's c-pawns.}
             6.bxc3 {Recapture; White's structure is damaged.}
             dxe4 {Open the centre now.}
-            7.fxe4 {Recapture; White has a big but loose centre and a weak e3/g1-a7 diagonal.}
-            e5 {Hit the centre immediately — White's king is still in the middle.}
-            8.Nf3 {Development, defending d4.}
-            exd4 {Release the tension to open lines toward White's king.}
-            9.cxd4 {Recapture.}
-            Nf6 {Develop and attack e4.}
-            10.Bd3 {Defends e4.}
-            c5 {Undermine d4 — White's centre starts to crumble and the d-file opens for Black's queen and rooks.}`,
+            7.fxe4 {This natural recapture is a mistake: it opens the e1-h4 diagonal.}
+            Qh4+ {Punish it! The check is very awkward: 8.g3 loses the rook after ...Qxe4+, so White's king has to walk.}
+            8.Ke2 {The only decent way out of check.}
+            Qxe4+ {Win the pawn with check.}
+            9.Kf2 {The king runs to the kingside.}
+            Qh4+ {Keep checking to force a weakening move.}
+            10.g3 {Blocks, but now the h1-a8 diagonal and the f3 square are weak.}
+            Qd8 {Back home: Black is a clean pawn up and White's king is exposed.}
+            11.Nf3 {Development.}
+            Nf6 {Develop and castle. Black has an extra pawn and the better structure.}`,
+        },
+        {
+          id: 'fan-e5',
+          name: '3...e6 4.Nc3 Bb4 5.e5',
+          pgn: `1.e4 c6 2.d4 d5 3.f3 e6 4.Nc3 Bb4
+            5.e5 {White closes the centre, French-style.}
+            Ne7 {The knight goes to e7 (f6 is taken away) heading for f5 or c6, and supports ...c5.}
+            6.a3 {Asking the bishop.}
+            Bxc3+ {Take the knight and double White's pawns.}
+            7.bxc3 {Recapture.}
+            Qa5 {Hit the weak c3-pawn. Black's plan is ...c5, ...Nbc6 and ...Qa4 or ...Ba6 pressure on the light squares White can't control.}
+            8.Bd2 {Defends c3.}
+            c5 {Attack the chain at d4. White's f3-pawn means White's kingside pieces are clumsy, so Black should open lines.}`,
         },
         {
           id: 'fan-nd2',
@@ -587,13 +615,15 @@ export const caroKann: Opening = {
             6.Bb5+ {Development with check.}
             Nc6 {Block and develop.}
             7.Ne2 {The knight can't go to f3, which is a downside of 3.f3.}
-            Bd6 {Develop actively, aiming at h2.}
-            8.dxc5 {White gives Black an isolated d-pawn.}
-            Bxc5 {Recapture with the bishop aimed at g1 — exactly the diagonal that 3.f3 weakened.}
-            9.Nb3 {Hitting the bishop.}
-            Bb6 {The bishop stays on the a7-g1 diagonal.}
-            10.Bd3 {White repositions the bishop — note that White cannot castle while Black's bishop controls g1.}
-            Nge7 {Develop and castle next. Black's activity and the pressure on the a7-g1 diagonal compensate for the isolated d-pawn.}`,
+            Nf6 {Develop the knight first; it guards d5 and h7 and lets Black castle quickly.}
+            8.O-O {White castles.}
+            Be7 {Develop and get ready to castle.}
+            9.dxc5 {White gives Black an isolated d-pawn.}
+            Bxc5+ {Recapture with check, putting the bishop on the a7-g1 diagonal — exactly the diagonal that 3.f3 weakened.}
+            10.Kh1 {The king steps out of the check.}
+            Bb6 {The bishop retreats but stays on the long diagonal.}
+            11.Nb3 {The knight blockades d4.}
+            O-O {Black castles with active pieces that compensate for the isolated pawn.}`,
         },
       ],
     },

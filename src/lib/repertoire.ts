@@ -11,6 +11,8 @@ export interface ParsedMove {
   /** Full FEN after the move. */
   fenAfter: string;
   comment?: string;
+  /** Marked [book] in the source: a deliberate practical/theory choice the engine may not agree with. */
+  book?: boolean;
 }
 
 export interface ParsedLine extends Line {
@@ -23,6 +25,7 @@ export interface MoveEdge {
   from: string;
   to: string;
   comment?: string;
+  book?: boolean;
   next: string;
   lineIds: Set<string>;
 }
@@ -48,18 +51,23 @@ export function positionKey(fen: string): string {
   return fen.split(' ').slice(0, 4).join(' ');
 }
 
-function tokenize(pgn: string): { move: string; comment?: string }[] {
-  const out: { move: string; comment?: string }[] = [];
+function tokenize(pgn: string): { move: string; comment?: string; book?: boolean }[] {
+  const out: { move: string; comment?: string; book?: boolean }[] = [];
   const re = /\{([^}]*)\}|([^\s{}]+)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(pgn))) {
     if (m[1] !== undefined) {
       const last = out[out.length - 1];
       if (!last) throw new Error('Comment before any move');
-      const text = m[1].replace(/\s+/g, ' ').trim();
+      let text = m[1].replace(/\s+/g, ' ').trim();
+      if (text.startsWith('[book]')) {
+        last.book = true;
+        text = text.slice(6).trim();
+      }
       last.comment = last.comment ? `${last.comment} ${text}` : text;
     } else {
-      const tok = m[2].replace(/^\d+\.+/, '');
+      // Strip move numbers and annotation glyphs (!, ?, !?, ?!).
+      const tok = m[2].replace(/^\d+\.+/, '').replace(/[!?]+$/, '');
       if (tok) out.push({ move: tok });
     }
   }
@@ -69,7 +77,7 @@ function tokenize(pgn: string): { move: string; comment?: string }[] {
 export function parseLine(line: Line, chapterId: string): ParsedLine {
   const chess = new Chess();
   const moves: ParsedMove[] = [];
-  for (const { move, comment } of tokenize(line.pgn)) {
+  for (const { move, comment, book } of tokenize(line.pgn)) {
     const before = positionKey(chess.fen());
     let result;
     try {
@@ -84,7 +92,8 @@ export function parseLine(line: Line, chapterId: string): ParsedLine {
       to: result.to,
       before,
       fenAfter: chess.fen(),
-      comment,
+      comment: comment || undefined,
+      book,
     });
   }
   return { ...line, chapterId, moves };
@@ -135,6 +144,7 @@ export function buildRepertoire(opening: Opening): Repertoire {
         node.moves.set(mv.san, edge);
       }
       edge.lineIds.add(line.id);
+      if (mv.book) edge.book = true;
       if (mv.comment) {
         if (!edge.comment || mv.comment.length > edge.comment.length) edge.comment = mv.comment;
       }

@@ -1,12 +1,19 @@
 # Openings Trainer
 
-A local, in-browser trainer for learning chess openings. It currently covers the **Caro-Kann Defence from Black's side**.
+A local, in-browser trainer for learning chess openings.
+It covers two repertoires, and you switch between them with the picker in the top bar:
 
-The computer plays White and picks from many different variations. You have to find Black's repertoire move. After each correct move you see **why** it's played: the ideas, plans and motifs behind it. You can also ask what White is aiming for.
+- **Caro-Kann Defence**, played as Black.
+- **Vienna Game**, played as White.
+
+The computer plays the other side and picks from many different variations.
+You have to find your repertoire move.
+After each correct move you see **why** it's played: the ideas, plans and motifs behind it.
+You can also ask what your opponent is aiming for.
 
 ## Run it
 
-Requires Node 20+.
+Requires Node 20.19+ (or 22.12+).
 
 ```bash
 npm install
@@ -17,36 +24,63 @@ Then open http://localhost:5173.
 
 ## How it works
 
-- **Drill**: the trainer picks the line that most needs practice. It starts with lines you haven't seen, then lines you made mistakes in, then lines you haven't played for a while. A wrong move is rejected and counted. After two misses the piece to move is highlighted, and **Hint** shows the full move. When a line ends you can click any move to re-read its explanation.
-- **Explore**: browse the whole repertoire tree. Green arrows show your moves and blue arrows show White's alternatives.
-- **Variations sidebar**: tick chapters to include them in drills, or click a single line to practise it. The dots show mastery. A line counts as mastered after three clean runs in a row.
+- **Drill**: the trainer picks the line that most needs practice.
+  It starts with lines you haven't seen, then lines you made mistakes in, then lines you haven't played for a while.
+  A wrong move is rejected and counted.
+  After two misses the piece to move is highlighted, and **Hint** shows the full move.
+  When a line ends you can click any move to re-read its explanation.
+- **Explore**: browse the whole repertoire tree.
+  Green arrows show your moves and blue arrows show your opponent's alternatives.
+- **Free play**: move the pieces for both sides, any legal move.
+  After every move the panel shows what the current opening's repertoire recommends from that position, with the explanation and the lines it belongs to, and you can click a suggestion to play it.
+  Transpositions are recognised, and when the game leaves the repertoire the panel says where and what was prepared instead.
+  Use the arrow buttons or the ← and → keys to step through the game, and Flip to view it from the other side.
+  Switching openings keeps the game, so you can check the same moves against the other repertoire.
+- **Variations sidebar**: tick chapters to include them in drills, or click a single line to practise it.
+  Each opening remembers its own ticked chapters.
+  The dots show mastery.
+  A line counts as mastered after three clean runs in a row.
 - **Guided mode** shows an arrow for every move, which helps on a first pass through new lines.
-- Progress is saved in your browser's localStorage.
+- Progress and settings are saved in your browser's localStorage.
 
 ## Engine (Stockfish)
 
-The app runs Stockfish 19 (the lite, single-threaded WebAssembly build) in your browser. `npm install` copies it into `public/engine/`. That folder is git-ignored, so the repo stays small.
+The app runs Stockfish 19 (the lite, single-threaded WebAssembly build) in your browser.
+`npm install` copies it into `public/engine/`.
+That folder is git-ignored, so the repo stays small.
 
-- **Was my move bad, or just different?** When you play a move that isn't in your repertoire, the engine checks it. It reports "fine too, just not your repertoire move", "a bit worse", "a mistake" or "loses by force", and shows the likely continuation.
-- **Engine analysis toggle** (top bar): shows an evaluation bar, a best-move arrow and the engine's top 3 lines. During a drill the arrow and lines stay hidden until you've played your move, so the engine doesn't give away the answer.
+- **Was my move bad, or just different?** When you play a move that isn't in your repertoire, the engine checks it.
+  It reports "fine too, just not your repertoire move", "a bit worse", "a mistake" or "loses by force", and shows the likely continuation.
+- **Engine analysis toggle** (top bar): shows an evaluation bar, a best-move arrow and the engine's top 3 lines.
+  During a drill the arrow and lines stay hidden until you've played your move, so the engine doesn't give away the answer.
 - **Play on vs engine**: at the end of a line, or from any position in Explore, you can keep playing against Stockfish at five strength levels, with undo.
 
 ### Engine policy: human lines first
 
-The repertoire is meant for playing humans, so it prefers established, practical lines over the engine's top choice. The engine is used as an error check:
+The repertoires are meant for playing humans, so they prefer established, practical lines over the engine's top choice.
+The engine is used as an error check:
 
 ```bash
-npm run engine-check            # depth 16; add -- --depth 20 for a deeper run
+npm run engine-check                        # every opening, depth 16
+npm run engine-check -- --opening vienna    # one opening
+npm run engine-check -- --depth 20          # a deeper run
+npm run engine-check -- --opponent          # also check the opponent's moves
 ```
 
-- **Likely mistakes**: a move that loses a pawn or more. These are almost always real errors and should be fixed.
-- **Review**: the engine prefers something else by 0.4–1 pawn. Fine to keep if it's established theory.
-- **Kept by choice**: moves marked with `[book]` at the start of their comment, such as a gambit or a well-known human line. They are never flagged.
+- **Likely mistakes**: a move that loses a pawn or more.
+  These are almost always real errors and should be fixed.
+- **Review**: the engine prefers something else by 0.4 to 1 pawn.
+  Fine to keep if it's established theory.
+- **Kept by choice**: moves marked with `[book]` at the start of their comment, such as a gambit, a well-known human line, or an opponent's blunder in a trap line.
+  They are never flagged.
 - **Final position of each line**: catches lines where small losses add up.
 
-Stockfish is GPLv3-licensed. That doesn't matter for personal use, but if you distribute the app with the engine bundled, the project needs to be GPL-compatible.
+Stockfish is GPLv3-licensed.
+That doesn't matter for personal use, but if you distribute the app with the engine bundled, the project needs to be GPL-compatible.
 
 ## Repertoire coverage
+
+### Caro-Kann Defence (Black)
 
 | Chapter | Lines |
 | --- | --- |
@@ -58,20 +92,35 @@ Stockfish is GPLv3-licensed. That doesn't matter for personal use, but if you di
 | Fantasy (3.f3): 4.Nc3 Bb4 5.a3 (punishing 7.fxe4), 5.e5, 4.Nd2 c5 | 3 |
 | Sidelines: King's Indian Attack 2.d3, 2.c4 | 2 |
 
-The lines are hand-written from standard Caro-Kann theory (not copied from a specific book) and checked with Stockfish for outright mistakes.
+### Vienna Game (White)
+
+| Chapter | Lines |
+| --- | --- |
+| Vienna Gambit (2...Nf6 3.f4 d5 4.fxe5 Nxe4 5.Nf3): 5...Be7 6.Qe2, 5...Nc6 6.Bb5, 5...Bg4 6.Qe2, 5...Bc5 6.d4, and the 4...d4? trap | 5 |
+| Gambit accepted and 3...d6: 3...exf4 4.e5 Ng8, the 4...Ng4? and 4...Nh5? traps, 3...d6 4.Nf3 | 4 |
+| 2...Nc6 (and 2...Bc5) 3.Bc4: 4.d3 Bc5 5.f4 with 7.Na4, the 6...Ng4 7.Ng5 trick and the 5...Ng4? trap, 4...Bb4, 4...Na5, 2...Bc5 move order | 6 |
+| 3...Bc5 4.Qg4: 4...Qf6 5.Nd5 (with 7...Qd4? and 7...h5!), 4...Nf6? with the Qxf7# trap, 4...g6 | 5 |
+
+The lines are hand-written from standard opening theory (not copied from a specific book) and checked with Stockfish for outright mistakes.
+The Vienna does not cover 2...d6 or 2...Bb4 yet.
 
 ## Adding or editing lines
 
-Lines live in `src/data/caroKann.ts` as mini-PGN, with a `{comment}` after a move to explain it:
+Each opening lives in its own file in `src/data/` (`caroKann.ts`, `vienna.ts`) and is listed in `src/data/openings.ts`.
+Lines are written as mini-PGN, with a `{comment}` after a move to explain it:
 
 ```
 1.e4 c6 2.d4 d5 3.e5 {White gains space.} Bf5 {Get the bishop out before ...e6.}
 ```
 
-Lines that share moves only need a comment once, because positions are merged across lines, transpositions included. After editing, run:
+Lines that share moves only need a comment once, because positions are merged across lines, transpositions included.
+Line ids must be unique across all openings, because progress is stored by line id.
+After editing, run:
 
 ```bash
 npm run validate
 ```
 
-This checks every move is legal and that Black always has a single repertoire move in each position. Then run `npm run engine-check` to catch blunders. Start a comment with `[book]` to keep a move the engine dislikes on purpose.
+This checks that every move is legal, that you always have a single repertoire move in each position, and that line ids are unique.
+Then run `npm run engine-check` to catch blunders.
+Start a comment with `[book]` to keep a move the engine dislikes on purpose.

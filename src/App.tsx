@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Chess, type Square } from 'chess.js';
 import { Chessboard, type Arrow } from 'react-chessboard';
-import { caroKann } from './data/caroKann.ts';
-import { buildRepertoire, type ParsedLine, type ParsedMove } from './lib/repertoire.ts';
+import { openings } from './data/openings.ts';
+import { buildRepertoire, positionKey, type ParsedLine, type ParsedMove, type Repertoire } from './lib/repertoire.ts';
 import {
   formatScore,
   getAnalysisEngine,
@@ -13,12 +13,15 @@ import {
 } from './lib/engine.ts';
 import { loadProgress, mastery, pickNextLine, recordRun, saveProgress, type Progress } from './lib/progress.ts';
 
-const rep = buildRepertoire(caroKann);
+const REPERTOIRES = new Map(openings.map((o) => [o.id, buildRepertoire(o)]));
 const START_FEN = new Chess().fen();
-const MY_COLOR = rep.opening.side === 'white' ? 'w' : 'b';
 const COMPUTER_DELAY = 650;
 
-type Mode = 'drill' | 'explore' | 'play';
+type Color = 'w' | 'b';
+const colorName = (c: Color) => (c === 'w' ? 'White' : 'Black');
+
+type Mode = 'drill' | 'explore' | 'free' | 'play';
+const MODE_NAMES: Record<Mode, string> = { drill: 'drill', explore: 'explore', free: 'free play', play: 'play' };
 type Feedback =
   | { kind: 'idle' }
   | { kind: 'wrong'; tried: string; attempts: number }
@@ -26,8 +29,12 @@ type Feedback =
   | { kind: 'done'; mistakes: number };
 
 const SETTINGS_KEY = 'openings-trainer:settings:v1';
+/** Before there was a choice of openings, settings.chapters was a plain list for this one. */
+const LEGACY_OPENING_ID = 'caro-kann';
 interface Settings {
-  chapters: string[];
+  opening: string;
+  /** Chapters ticked for drills, per opening id. An opening with no entry has every chapter ticked. */
+  chapters: Record<string, string[]>;
   guided: boolean;
   engine: boolean;
   level: number;
@@ -52,21 +59,40 @@ interface PlayMove {
   to: string;
   fen: string;
 }
+/** A free-play game: every move played, and how far into it the board is showing. */
+interface FreeGame {
+  moves: PlayMove[];
+  cursor: number;
+}
+type Setter<T> = React.Dispatch<React.SetStateAction<T>>;
+
 function loadSettings(): Settings {
-  const all = rep.opening.chapters.map((c) => c.id);
+  const defaults: Settings = { opening: openings[0].id, chapters: {}, guided: false, engine: false, level: 2 };
   try {
-    const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null') as Settings | null;
-    if (s && Array.isArray(s.chapters))
-      return {
-        chapters: s.chapters.filter((c) => all.includes(c)),
-        guided: !!s.guided,
-        engine: !!s.engine,
-        level: typeof s.level === 'number' ? s.level : 2,
-      };
+    const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
+    if (!s || typeof s !== 'object') return defaults;
+    const chapters: Record<string, string[]> = Array.isArray(s.chapters)
+      ? { [LEGACY_OPENING_ID]: s.chapters }
+      : s.chapters && typeof s.chapters === 'object'
+        ? s.chapters
+        : {};
+    return {
+      opening: REPERTOIRES.has(s.opening) ? s.opening : defaults.opening,
+      chapters,
+      guided: !!s.guided,
+      engine: !!s.engine,
+      level: typeof s.level === 'number' ? s.level : 2,
+    };
   } catch {
-    /* ignore */
+    return defaults;
   }
-  return { chapters: all, guided: false, engine: false, level: 2 };
+}
+
+/** The chapters ticked for this opening, dropping ids that no longer exist. */
+function tickedChapters(rep: Repertoire, settings: Settings): string[] {
+  const all = rep.opening.chapters.map((c) => c.id);
+  const saved = settings.chapters[rep.opening.id];
+  return saved ? saved.filter((c) => all.includes(c)) : all;
 }
 
 function moveLabel(moves: ParsedMove[], i: number) {
@@ -75,10 +101,7 @@ function moveLabel(moves: ParsedMove[], i: number) {
 }
 
 export default function App() {
-  const [mode, setMode] = useState<Mode>('drill');
   const [settings, setSettings] = useState<Settings>(loadSettings);
-  const [progress, setProgress] = useState<Progress>(loadProgress);
-
   useEffect(() => {
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -86,11 +109,62 @@ export default function App() {
       /* ignore */
     }
   }, [settings]);
+  // The mode and the free-play game live here so they survive switching openings:
+  // the same game is then checked against the other repertoire.
+  const [mode, setMode] = useState<Mode>('drill');
+  const [free, setFree] = useState<FreeGame>({ moves: [], cursor: 0 });
+  const rep = REPERTOIRES.get(settings.opening)!;
+  const switchOpening = (id: string) => {
+    setSettings((s) => ({ ...s, opening: id }));
+    // A play-on game belongs to the old opening's trainer, which is about to reset.
+    setMode((m) => (m === 'play' ? 'drill' : m));
+  };
+  // Keyed by opening so the drill and explore state start fresh on the new repertoire.
+  return (
+    <Trainer
+      key={rep.opening.id}
+      rep={rep}
+      settings={settings}
+      setSettings={setSettings}
+      onSwitchOpening={switchOpening}
+      mode={mode}
+      setMode={setMode}
+      free={free}
+      setFree={setFree}
+    />
+  );
+}
+
+function Trainer({
+  rep,
+  settings,
+  setSettings,
+  onSwitchOpening,
+  mode,
+  setMode,
+  free,
+  setFree,
+}: {
+  rep: Repertoire;
+  settings: Settings;
+  setSettings: Setter<Settings>;
+  onSwitchOpening: (id: string) => void;
+  mode: Mode;
+  setMode: Setter<Mode>;
+  free: FreeGame;
+  setFree: Setter<FreeGame>;
+}) {
+  const myColor: Color = rep.opening.side === 'white' ? 'w' : 'b';
+  const opponent = colorName(myColor === 'w' ? 'b' : 'w');
+  const [progress, setProgress] = useState<Progress>(loadProgress);
   useEffect(() => saveProgress(progress), [progress]);
 
+  const chapters = tickedChapters(rep, settings);
+  const chaptersKey = chapters.join(',');
   const eligible = useMemo(
-    () => rep.lines.filter((l) => settings.chapters.includes(l.chapterId)),
-    [settings.chapters],
+    () => rep.lines.filter((l) => chapters.includes(l.chapterId)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rep, chaptersKey],
   );
 
   // ----- Drill state -----
@@ -99,7 +173,7 @@ export default function App() {
   const [mistakes, setMistakes] = useState(0);
   const [feedback, setFeedback] = useState<Feedback>({ kind: 'idle' });
   const [hintShown, setHintShown] = useState(false);
-  const [showWhiteIdea, setShowWhiteIdea] = useState(false);
+  const [showOpponentIdea, setShowOpponentIdea] = useState(false);
   const [viewPly, setViewPly] = useState<number | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const missedThisMove = useRef(false);
@@ -112,7 +186,7 @@ export default function App() {
     setMistakes(0);
     setFeedback({ kind: 'idle' });
     setHintShown(false);
-    setShowWhiteIdea(false);
+    setShowOpponentIdea(false);
     setViewPly(null);
     setSelected(null);
     missedThisMove.current = false;
@@ -129,13 +203,13 @@ export default function App() {
   const expected = line?.moves[ply];
   const lineDone = !!line && ply >= line.moves.length;
   useEffect(() => {
-    if (mode !== 'drill' || !expected || expected.color === MY_COLOR) return;
+    if (mode !== 'drill' || !expected || expected.color === myColor) return;
     const t = setTimeout(() => {
       setPly((p) => p + 1);
-      setShowWhiteIdea(false);
+      setShowOpponentIdea(false);
     }, COMPUTER_DELAY);
     return () => clearTimeout(t);
-  }, [mode, expected]);
+  }, [mode, expected, myColor]);
 
   // Record completion once.
   const recorded = useRef<string | null>(null);
@@ -152,7 +226,7 @@ export default function App() {
   }, [ply, line]);
 
   const drillFen = line && ply > 0 ? line.moves[ply - 1].fenAfter : START_FEN;
-  const myTurn = mode === 'drill' && !!expected && expected.color === MY_COLOR && viewPly === null;
+  const myTurn = mode === 'drill' && !!expected && expected.color === myColor && viewPly === null;
 
   const tryDrillMove = (from: string, to: string): boolean => {
     if (!myTurn || !expected || !line) return false;
@@ -240,15 +314,57 @@ export default function App() {
     setExploreLast(null);
   };
 
+  // ----- Free play: you move both sides and the repertoire guides you -----
+  const [flipped, setFlipped] = useState(false);
+  const freeFen = free.cursor ? free.moves[free.cursor - 1].fen : START_FEN;
+  const freeNode = rep.nodes.get(positionKey(freeFen));
+
+  /** Play a move in free play. Moving from an earlier position replaces the moves after it. */
+  const applyFreeMove = (move: string | { from: string; to: string; promotion: string }): boolean => {
+    const c = new Chess(freeFen);
+    try {
+      const m = c.move(move);
+      const next = { san: m.san, from: m.from, to: m.to, fen: c.fen() };
+      setFree((f) => ({ moves: [...f.moves.slice(0, f.cursor), next], cursor: f.cursor + 1 }));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const jumpFree = (ply: number) => {
+    setSelected(null);
+    setFree((f) => ({ ...f, cursor: Math.max(0, Math.min(f.moves.length, ply)) }));
+  };
+
+  // Arrow keys step through the free-play game.
+  useEffect(() => {
+    if (mode !== 'free') return;
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      setSelected(null);
+      setFree((f) => ({
+        ...f,
+        cursor: e.key === 'ArrowLeft' ? Math.max(0, f.cursor - 1) : Math.min(f.moves.length, f.cursor + 1),
+      }));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mode]);
+
   // ----- Play-on vs engine -----
-  const [play, setPlay] = useState<{ startFen: string; moves: PlayMove[]; origin: string } | null>(null);
+  const [play, setPlay] = useState<{ startFen: string; moves: PlayMove[]; origin: string; returnTo: Mode } | null>(
+    null,
+  );
   const playFen = play ? (play.moves.length ? play.moves[play.moves.length - 1].fen : play.startFen) : START_FEN;
   const playGame = useMemo(() => new Chess(playFen), [playFen]);
   const playOver = playGame.isGameOver();
   const [engineThinking, setEngineThinking] = useState(false);
 
-  const startPlay = (fen: string, origin: string) => {
-    setPlay({ startFen: fen, moves: [], origin });
+  const startPlay = (fen: string, origin: string, returnTo: Mode) => {
+    setPlay({ startFen: fen, moves: [], origin, returnTo });
     setSelected(null);
     setMode('play');
   };
@@ -269,13 +385,13 @@ export default function App() {
       if (!p || !p.moves.length) return p;
       const moves = p.moves.slice(0, -1);
       const turnOf = (ms: PlayMove[]) => (ms.length ? ms[ms.length - 1].fen : p.startFen).split(' ')[1];
-      while (moves.length && turnOf(moves) !== MY_COLOR) moves.pop();
+      while (moves.length && turnOf(moves) !== myColor) moves.pop();
       return { ...p, moves };
     });
 
   // The engine answers when it is its turn.
   useEffect(() => {
-    if (mode !== 'play' || !play || playOver || playFen.split(' ')[1] === MY_COLOR) return;
+    if (mode !== 'play' || !play || playOver || playFen.split(' ')[1] === myColor) return;
     let live = true;
     setEngineThinking(true);
     const level = LEVELS[settings.level] ?? LEVELS[2];
@@ -298,7 +414,9 @@ export default function App() {
   const boardFen =
     mode === 'explore'
       ? exploreNode.fen
-      : mode === 'play'
+      : mode === 'free'
+        ? freeFen
+        : mode === 'play'
         ? playFen
         : viewing
         ? viewPly === 0
@@ -308,6 +426,7 @@ export default function App() {
 
   const lastMove = (() => {
     if (mode === 'explore') return null;
+    if (mode === 'free') return free.moves[free.cursor - 1] ?? null;
     if (mode === 'play') return play?.moves[play.moves.length - 1] ?? null;
     const idx = (viewPly ?? ply) - 1;
     return line && idx >= 0 ? line.moves[idx] : null;
@@ -337,12 +456,15 @@ export default function App() {
     // After two misses, show which piece moves.
     squareStyles[expected.from] = { ...squareStyles[expected.from], boxShadow: 'inset 0 0 0 4px rgba(40,160,80,0.9)' };
   }
-  if (mode === 'explore') {
-    for (const e of exploreMoves) {
+  // Explore and free play show the repertoire's moves from the current position.
+  const treeNode = mode === 'explore' ? exploreNode : mode === 'free' ? freeNode : undefined;
+  if (treeNode) {
+    const mine = treeNode.fen.split(' ')[1] === myColor;
+    for (const e of treeNode.moves.values()) {
       arrows.push({
         startSquare: e.from,
         endSquare: e.to,
-        color: (exploreNode.fen.split(' ')[1] === MY_COLOR) ? 'rgba(40,160,80,0.8)' : 'rgba(60,110,200,0.6)',
+        color: mine ? 'rgba(40,160,80,0.8)' : 'rgba(60,110,200,0.6)',
       });
     }
   }
@@ -371,13 +493,19 @@ export default function App() {
   const liveLines = analysis && analysis.fen === boardFen ? analysis.lines : [];
   if (settings.engine && !engineSpoiler && liveLines[0]?.pv[0]) {
     const u = liveLines[0].pv[0];
-    arrows.push({ startSquare: u.slice(0, 2), endSquare: u.slice(2, 4), color: 'rgba(230,120,20,0.8)' });
+    const [startSquare, endSquare] = [u.slice(0, 2), u.slice(2, 4)];
+    // The board keys arrows by their squares, so skip the engine arrow when a
+    // repertoire arrow already covers the same move (the engine panel still shows it).
+    if (!arrows.some((a) => a.startSquare === startSquare && a.endSquare === endSquare)) {
+      arrows.push({ startSquare, endSquare, color: 'rgba(230,120,20,0.8)' });
+    }
   }
 
   const tryMove = (from: string, to: string): boolean => {
     setSelected(null);
     if (mode === 'drill') return tryDrillMove(from, to);
     if (mode === 'play') return playerCanMove ? applyPlayMove(from, to) : false;
+    if (mode === 'free') return applyFreeMove({ from, to, promotion: 'q' });
     const c = new Chess(exploreNode.fen);
     try {
       const san = c.move({ from, to, promotion: 'q' }).san;
@@ -392,8 +520,10 @@ export default function App() {
   };
 
   const turnColor = boardFen.split(' ')[1];
-  const playerCanMove = mode === 'play' && !playOver && turnColor === MY_COLOR;
-  const canMovePieces = mode === 'explore' || myTurn || playerCanMove;
+  const playerCanMove = mode === 'play' && !playOver && turnColor === myColor;
+  const canMovePieces = mode === 'explore' || mode === 'free' || myTurn || playerCanMove;
+  const otherSide = rep.opening.side === 'white' ? 'black' : 'white';
+  const orientation = mode === 'free' && flipped ? otherSide : rep.opening.side;
 
   const onSquareClick = ({ square, piece }: { square: string; piece: { pieceType: string } | null }) => {
     if (!canMovePieces) return;
@@ -409,14 +539,16 @@ export default function App() {
   };
 
   // ----- Panels -----
-  const whiteMoveJustPlayed = mode === 'drill' && line && ply > 0 && line.moves[ply - 1].color !== MY_COLOR ? line.moves[ply - 1] : null;
+  const opponentMoveJustPlayed =
+    mode === 'drill' && line && ply > 0 && line.moves[ply - 1].color !== myColor ? line.moves[ply - 1] : null;
   const chapter = line ? rep.chapterOf.get(line.id) : undefined;
 
   const toggleChapter = (id: string) =>
-    setSettings((s) => ({
-      ...s,
-      chapters: s.chapters.includes(id) ? s.chapters.filter((c) => c !== id) : [...s.chapters, id],
-    }));
+    setSettings((s) => {
+      const current = tickedChapters(rep, s);
+      const next = current.includes(id) ? current.filter((c) => c !== id) : [...current, id];
+      return { ...s, chapters: { ...s.chapters, [rep.opening.id]: next } };
+    });
 
   const [openChapters, setOpenChapters] = useState<Set<string>>(() => new Set(line ? [line.chapterId] : []));
   const toggleOpen = (id: string) =>
@@ -436,15 +568,32 @@ export default function App() {
           <span className="logo">♞</span>
           <div>
             <h1>Openings Trainer</h1>
-            <p>{rep.opening.name} · you play {rep.opening.side === 'black' ? 'Black' : 'White'}</p>
+            <p>
+              {totalKnown}/{rep.lines.length} lines mastered
+            </p>
           </div>
         </div>
+        <select
+          className="opening-picker"
+          aria-label="Opening"
+          value={rep.opening.id}
+          onChange={(e) => onSwitchOpening(e.target.value)}
+        >
+          {openings.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.name} · you play {o.side === 'white' ? 'White' : 'Black'}
+            </option>
+          ))}
+        </select>
         <div className="tabs" role="tablist">
           <button className={mode === 'drill' ? 'active' : ''} onClick={() => setMode('drill')}>
             Drill
           </button>
           <button className={mode === 'explore' ? 'active' : ''} onClick={() => setMode('explore')}>
             Explore
+          </button>
+          <button className={mode === 'free' ? 'active' : ''} onClick={() => setMode('free')}>
+            Free play
           </button>
           {play && (
             <button className={mode === 'play' ? 'active' : ''} onClick={() => setMode('play')}>
@@ -460,9 +609,6 @@ export default function App() {
           />
           Engine analysis
         </label>
-        <div className="score">
-          {totalKnown}/{rep.lines.length} lines mastered
-        </div>
       </header>
 
       <main className="layout">
@@ -477,7 +623,7 @@ export default function App() {
                 <div className="chapter-head">
                   <input
                     type="checkbox"
-                    checked={settings.chapters.includes(ch.id)}
+                    checked={chapters.includes(ch.id)}
                     onChange={() => toggleChapter(ch.id)}
                     aria-label={`Include ${ch.name} in drills`}
                   />
@@ -521,12 +667,12 @@ export default function App() {
 
         <section className="board-col">
           <div className="board-row">
-          {settings.engine && <EvalBar lines={liveLines} orientation={rep.opening.side} />}
+          {settings.engine && <EvalBar lines={liveLines} orientation={orientation} />}
           <div className="board-wrap">
             <Chessboard
               options={{
                 position: boardFen,
-                boardOrientation: rep.opening.side,
+                boardOrientation: orientation,
                 squareStyles,
                 arrows,
                 allowDrawingArrows: true,
@@ -549,8 +695,30 @@ export default function App() {
               <button onClick={() => play && setPlay({ ...play, moves: [] })} disabled={!play?.moves.length}>
                 Restart
               </button>
-              <button className="primary" onClick={() => setMode(line ? 'drill' : 'explore')}>
-                Back to {line ? 'drill' : 'explore'}
+              <button className="primary" onClick={() => setMode(play?.returnTo ?? 'drill')}>
+                Back to {MODE_NAMES[play?.returnTo ?? 'drill']}
+              </button>
+            </div>
+          ) : mode === 'free' ? (
+            <div className="controls">
+              <button onClick={() => jumpFree(0)} disabled={free.cursor === 0} title="Start position">
+                ⏮
+              </button>
+              <button onClick={() => jumpFree(free.cursor - 1)} disabled={free.cursor === 0} title="Back (←)">
+                ◀
+              </button>
+              <button
+                onClick={() => jumpFree(free.cursor + 1)}
+                disabled={free.cursor >= free.moves.length}
+                title="Forward (→)"
+              >
+                ▶
+              </button>
+              <button onClick={() => setFlipped((f) => !f)} title="Flip the board">
+                ⇅ Flip
+              </button>
+              <button className="primary" onClick={() => startPlay(freeFen, 'Free play position', 'free')}>
+                Play from here vs engine
               </button>
             </div>
           ) : mode === 'drill' ? (
@@ -569,7 +737,7 @@ export default function App() {
               <button onClick={exploreBack} disabled={explorePath.length <= 1}>
                 ◀ Back
               </button>
-              <button className="primary" onClick={() => startPlay(exploreNode.fen, 'Explore position')}>
+              <button className="primary" onClick={() => startPlay(exploreNode.fen, 'Explore position', 'explore')}>
                 Play from here vs engine
               </button>
             </div>
@@ -586,6 +754,8 @@ export default function App() {
                 </div>
 
                 <StatusBox
+                  me={colorName(myColor)}
+                  opponent={opponent}
                   feedback={feedback}
                   myTurn={myTurn}
                   lineDone={lineDone}
@@ -593,23 +763,23 @@ export default function App() {
                   onNext={nextLine}
                   onRetry={() => startLine(line)}
                   onBackToLive={() => setViewPly(null)}
-                  onPlayOn={() => startPlay(drillFen, line.name)}
+                  onPlayOn={() => startPlay(drillFen, line.name, 'drill')}
                   verdict={verdict}
                 />
 
-                {whiteMoveJustPlayed && !lineDone && viewPly === null && (
-                  <div className="card white-move">
+                {opponentMoveJustPlayed && !lineDone && viewPly === null && (
+                  <div className="card opponent-move">
                     <div className="card-head">
                       <span>
-                        White played <b>{moveLabel(line.moves, ply - 1)}</b>
+                        {opponent} played <b>{moveLabel(line.moves, ply - 1)}</b>
                       </span>
-                      {whiteMoveJustPlayed.comment && !showWhiteIdea && (
-                        <button className="link" onClick={() => setShowWhiteIdea(true)}>
-                          What is White up to?
+                      {opponentMoveJustPlayed.comment && !showOpponentIdea && (
+                        <button className="link" onClick={() => setShowOpponentIdea(true)}>
+                          What is {opponent} up to?
                         </button>
                       )}
                     </div>
-                    {showWhiteIdea && whiteMoveJustPlayed.comment && <p>{whiteMoveJustPlayed.comment}</p>}
+                    {showOpponentIdea && opponentMoveJustPlayed.comment && <p>{opponentMoveJustPlayed.comment}</p>}
                   </div>
                 )}
 
@@ -661,9 +831,23 @@ export default function App() {
             ) : (
               <p className="muted">Tick at least one chapter on the left to start drilling.</p>
             )
+          ) : mode === 'free' ? (
+            <>
+              <FreePanel
+                rep={rep}
+                myColor={myColor}
+                opponent={opponent}
+                moves={free.moves}
+                cursor={free.cursor}
+                onGo={(san) => applyFreeMove(san)}
+                onJump={jumpFree}
+              />
+              {settings.engine && <EnginePanel fen={boardFen} lines={liveLines} hidden={false} />}
+            </>
           ) : mode === 'play' && play ? (
             <>
               <PlayPanel
+                myColor={myColor}
                 play={play}
                 game={playGame}
                 thinking={engineThinking}
@@ -675,6 +859,9 @@ export default function App() {
           ) : (
             <>
               <ExplorePanel
+                rep={rep}
+                myColor={myColor}
+                opponent={opponent}
                 path={explorePath}
                 moves={exploreMoves}
                 turn={exploreNode.fen.split(' ')[1] as 'w' | 'b'}
@@ -694,6 +881,8 @@ export default function App() {
 }
 
 function StatusBox(props: {
+  me: string;
+  opponent: string;
   feedback: Feedback;
   myTurn: boolean;
   lineDone: boolean;
@@ -737,8 +926,8 @@ function StatusBox(props: {
         {verdict && verdict.tried === feedback.tried && <VerdictNote verdict={verdict} />}
       </div>
     );
-  if (myTurn) return <div className="status info">Your move (Black).</div>;
-  return <div className="status muted-status">White is thinking…</div>;
+  if (myTurn) return <div className="status info">Your move ({props.me}).</div>;
+  return <div className="status muted-status">{props.opponent} is thinking…</div>;
 }
 
 function MoveList(props: {
@@ -784,13 +973,16 @@ function MoveList(props: {
 }
 
 function ExplorePanel(props: {
+  rep: Repertoire;
+  myColor: Color;
+  opponent: string;
   path: string[];
   moves: { san: string; comment?: string; lineIds: Set<string> }[];
-  turn: 'w' | 'b';
-  last: { san: string; comment?: string; color: 'w' | 'b' } | null;
+  turn: Color;
+  last: { san: string; comment?: string; color: Color } | null;
   onGo: (san: string) => void;
 }) {
-  const { moves, turn, last } = props;
+  const { rep, myColor, opponent, moves, turn, last } = props;
   const lineNames = (ids: Set<string>) =>
     [...ids]
       .map((id) => rep.lineById.get(id)?.name)
@@ -801,10 +993,10 @@ function ExplorePanel(props: {
     <>
       <div className="line-title">
         <span className="muted small">Explore the repertoire tree</span>
-        <h2>{turn === MY_COLOR ? 'Your repertoire move' : 'White’s options'}</h2>
+        <h2>{turn === myColor ? 'Your repertoire move' : `${opponent}’s options`}</h2>
       </div>
       {last?.comment && (
-        <div className={`card ${last.color === MY_COLOR ? 'why' : 'white-move'}`}>
+        <div className={`card ${last.color === myColor ? 'why' : 'opponent-move'}`}>
           <div className="card-head">
             <span>
               <b>{last.san}</b>
@@ -830,7 +1022,153 @@ function ExplorePanel(props: {
         </ul>
       )}
       <p className="muted small">
-        Green arrows are your repertoire moves; blue arrows are White’s tries. Click a move or play it on the board.
+        Green arrows are your repertoire moves; blue arrows are {opponent}’s tries. Click a move or play it on the board.
+      </p>
+    </>
+  );
+}
+
+/** "3.f4" or "3...d5" for the move at this ply of a game from the start position. */
+function plyLabel(ply: number, san: string) {
+  const n = Math.floor(ply / 2) + 1;
+  return ply % 2 === 0 ? `${n}.${san}` : `${n}...${san}`;
+}
+
+function lineNames(rep: Repertoire, ids: Set<string>) {
+  const names = [...ids].map((id) => rep.lineById.get(id)?.name).filter(Boolean);
+  const more = names.length > 3 ? ` +${names.length - 3} more` : '';
+  return names.slice(0, 3).join(' · ') + more;
+}
+
+function FreePanel(props: {
+  rep: Repertoire;
+  myColor: Color;
+  opponent: string;
+  moves: PlayMove[];
+  cursor: number;
+  onGo: (san: string) => void;
+  onJump: (ply: number) => void;
+}) {
+  const { rep, myColor, opponent, moves, cursor } = props;
+  const fenAt = (ply: number) => (ply === 0 ? START_FEN : moves[ply - 1].fen);
+  const nodeAt = (ply: number) => rep.nodes.get(positionKey(fenAt(ply)));
+  const turnAt = (ply: number) => fenAt(ply).split(' ')[1] as Color;
+  const isBookMove = (ply: number) => !!nodeAt(ply)?.moves.has(moves[ply].san);
+
+  const node = nodeAt(cursor);
+  const options = node ? [...node.moves.values()] : [];
+  const myTurn = turnAt(cursor) === myColor;
+  const lastPly = cursor - 1;
+  const lastEdge = lastPly >= 0 ? nodeAt(lastPly)?.moves.get(moves[lastPly].san) : undefined;
+
+  // Out of book: find the last repertoire position before this one (the start always is one).
+  let leftBook: { ply: number; text: string } | null = null;
+  if (!node) {
+    let ply = cursor - 1;
+    while (ply > 0 && !nodeAt(ply)) ply--;
+    const from = nodeAt(ply)!;
+    const played = plyLabel(ply, moves[ply].san);
+    const prepared = [...from.moves.keys()].map((san) => plyLabel(ply, san)).join(', ');
+    const text = !from.moves.size
+      ? `Your prepared lines end before ${played}, so from here you're on your own.`
+      : turnAt(ply) === myColor
+        ? `You played ${played}, but your repertoire plays ${prepared}.`
+        : `${opponent} played ${played}, which your repertoire doesn't cover. It prepares ${prepared}.`;
+    leftBook = { ply, text };
+  }
+
+  const heading = !node
+    ? 'Out of your repertoire'
+    : !options.length
+      ? 'End of your prepared lines'
+      : myTurn
+        ? 'Your repertoire move'
+        : `${opponent}’s options`;
+
+  const rows: { n: number; w?: number; b?: number }[] = [];
+  moves.forEach((_, i) => {
+    const n = Math.floor(i / 2) + 1;
+    if (i % 2 === 0) rows.push({ n, w: i });
+    else if (rows.length) rows[rows.length - 1].b = i;
+  });
+  const cell = (i?: number) =>
+    i === undefined ? (
+      <span />
+    ) : (
+      <button
+        className={`mv ${cursor === i + 1 ? 'current' : ''} ${isBookMove(i) ? '' : 'off-book'}`}
+        onClick={() => props.onJump(i + 1)}
+        title={isBookMove(i) ? 'Repertoire move' : 'Not in your repertoire'}
+      >
+        {moves[i].san}
+      </button>
+    );
+
+  return (
+    <>
+      <div className="line-title">
+        <span className="muted small">Free play · you move both sides</span>
+        <h2>{heading}</h2>
+      </div>
+
+      {lastEdge?.comment && (
+        <div className={`card ${turnAt(lastPly) === myColor ? 'why' : 'opponent-move'}`}>
+          <div className="card-head">
+            <span>
+              <b>{plyLabel(lastPly, moves[lastPly].san)}</b>
+            </span>
+          </div>
+          <p>{lastEdge.comment}</p>
+        </div>
+      )}
+
+      {leftBook && (
+        <div className="status warn">
+          {leftBook.text}{' '}
+          <button className="link" onClick={() => props.onJump(leftBook.ply)}>
+            Go back to that position
+          </button>
+        </div>
+      )}
+
+      {options.length > 0 && (
+        <ul className="explore-moves">
+          {options.map((m) => (
+            <li key={m.san}>
+              <button onClick={() => props.onGo(m.san)}>
+                <b>{plyLabel(cursor, m.san)}</b>
+                {myTurn && m.comment && <span className="small">{m.comment}</span>}
+                <span className="muted small">
+                  {m.lineIds.size} line{m.lineIds.size > 1 ? 's' : ''} · {lineNames(rep, m.lineIds)}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {node && !options.length && (
+        <p className="muted small">
+          Keep playing to practise the middlegame, turn on Engine analysis, or go back and try another branch.
+        </p>
+      )}
+
+      <div className="movelist">
+        {moves.length === 0 ? (
+          <span className="muted small">Make a move on the board for either side, or pick a move above.</span>
+        ) : (
+          rows.map((r) => (
+            <div key={r.n} className="mvrow">
+              <span className="mvnum">{r.n}.</span>
+              {cell(r.w)}
+              {cell(r.b)}
+            </div>
+          ))
+        )}
+      </div>
+
+      <p className="muted small">
+        Green arrows are your repertoire moves; blue arrows are {opponent}’s tries. Grey italic moves are not in your
+        repertoire. Use ← and → to step through the game.
       </p>
     </>
   );
@@ -913,23 +1251,24 @@ function EnginePanel({ fen, lines, hidden }: { fen: string; lines: EngineLine[];
 }
 
 function PlayPanel(props: {
+  myColor: Color;
   play: { startFen: string; moves: PlayMove[]; origin: string };
   game: Chess;
   thinking: boolean;
   level: number;
   onLevel: (l: number) => void;
 }) {
-  const { play, game, thinking } = props;
+  const { myColor, play, game, thinking } = props;
   let status: string;
   let cls = 'info';
   if (game.isCheckmate()) {
-    const youWon = game.turn() !== MY_COLOR;
+    const youWon = game.turn() !== myColor;
     status = youWon ? 'Checkmate — you win!' : 'Checkmate — the engine wins.';
     cls = youWon ? 'good' : 'bad';
   } else if (game.isDraw()) {
     status = 'Draw.';
     cls = 'warn';
-  } else if (game.turn() === MY_COLOR) {
+  } else if (game.turn() === myColor) {
     status = game.inCheck() ? 'Your move — you are in check.' : 'Your move.';
   } else {
     status = thinking ? 'Engine is thinking…' : 'Engine to move.';

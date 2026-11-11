@@ -26,22 +26,23 @@ Then open http://localhost:5173.
 
 - **Drill**: the trainer picks the line that most needs practice.
   It starts with lines you haven't seen, then lines you made mistakes in, then lines you haven't played for a while.
-  A wrong move is rejected and counted.
+  Your own moves are hidden in the line's title (shown as a blank) until you finish it, so the name doesn't give the answers away.
+  A wrong move is rejected and counted, and Stockfish says whether it was fine, a little worse or a real mistake.
   After two misses the piece to move is highlighted, and **Hint** shows the full move.
-  When a line ends you can click any move to re-read its explanation.
-- **Explore**: browse the whole repertoire tree.
-  Green arrows show your moves and blue arrows show your opponent's alternatives.
-- **Free play**: move the pieces for both sides, any legal move.
-  After every move the panel shows what the current opening's repertoire recommends from that position, with the explanation and the lines it belongs to, and you can click a suggestion to play it.
+  Use ← and → or click a move to review earlier positions and their explanations.
+- **Explore**: move the pieces for both sides, any legal move, or click one of the suggested moves.
+  After every move the panel shows what the current opening's repertoire recommends from that position, with the explanation and the lines it belongs to.
   Transpositions are recognised, and when the game leaves the repertoire the panel says where and what was prepared instead.
+  Click a line in the sidebar to load it onto the board and step through it.
   Use the arrow buttons or the ← and → keys to step through the game, and Flip to view it from the other side.
   Switching openings keeps the game, so you can check the same moves against the other repertoire.
-- **Variations sidebar**: tick chapters to include them in drills, or click a single line to practise it.
+- **Variations sidebar**: tick chapters to include them in drills (All and None tick or untick every chapter), or click a single line to practise it.
   Each opening remembers its own ticked chapters.
   The dots show mastery.
   A line counts as mastered after three clean runs in a row.
-- **Guided mode** shows an arrow for every move, which helps on a first pass through new lines.
+- **Guided drills** show an arrow for every move, which helps on a first pass through new lines.
 - Progress and settings are saved in your browser's localStorage.
+  **Reset progress** in the footer clears the progress for the current opening.
 
 ## Engine (Stockfish)
 

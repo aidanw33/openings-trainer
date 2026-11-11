@@ -13,6 +13,7 @@ export type Feedback =
   | { kind: 'done'; mistakes: number };
 
 export function DrillPanel(props: {
+  sessionStreak: number;
   line: ParsedLine;
   chapter?: Chapter;
   myColor: Color;
@@ -53,6 +54,12 @@ export function DrillPanel(props: {
         <h2 title={reveal ? undefined : 'Your moves are hidden until you finish the line'}>{lineName}</h2>
       </div>
 
+      <div className="lesson-progress">
+        <div className="progress-meta"><span>{lineDone ? 'Practice complete' : 'Build your opening instincts'}</span><b>↗ {props.sessionStreak} streak</b></div>
+        <progress aria-label="Line progress" value={ply} max={line.moves.length} />
+        <span className="muted small">{Math.min(props.stats?.streak ?? 0, 3)} / 3 clean runs to mastery</span>
+      </div>
+      {lineDone && <div className="celebration" key={line.id} aria-hidden="true">{(props.stats?.streak ?? 0) >= 3 ? '✦ Line mastered ✦' : '✦ Line complete ✦'}</div>}
       <DrillStatus {...props} />
 
       {props.firstVisit && ply <= 1 && (
@@ -66,11 +73,13 @@ export function DrillPanel(props: {
         </div>
       )}
 
+      {lineDone && viewPly === null && <div className="coach-bubble"><b>Your coach · final move</b><p>{line.moves.at(-1)?.comment ?? 'You reached the end of your prepared line. Review the moves to reinforce the plan.'}</p></div>}
+
       {feedback.kind === 'correct' && viewPly === null && (
-        <div className="card why">
+        <div className="coach-bubble">
           <div className="card-head">
             <b>✓ {plyLabel(feedback.ply, feedback.move.san)}</b>
-            <span className="muted small">why it’s played</span>
+            <span className="muted small">Your coach</span>
           </div>
           <p>{feedback.move.comment ?? 'Repertoire move.'}</p>
         </div>
@@ -119,7 +128,7 @@ function DrillStatus(props: Parameters<typeof DrillPanel>[0]) {
     <div className="status-actions">
       {done.mistakes > 0 && <button onClick={props.onRetry}>Try again</button>}
       <button onClick={props.onPlayOn}>Play on vs engine</button>
-      <button className="primary" onClick={props.onNext} autoFocus>
+      <button className="primary" onClick={props.onNext} title="Next line (N)">
         Next line →
       </button>
     </div>
@@ -174,7 +183,7 @@ function DrillStatus(props: Parameters<typeof DrillPanel>[0]) {
         {feedback.attempts >= 2 ? ': the highlighted piece is the one to move.' : '.'}
         {v && (
           <div className="verdict">
-            {verdictText(v)}
+            {v.status === 'done' && v.grade && <b className="grade-label">{v.grade} · </b>}{verdictText(v)}
             {v.status === 'done' && sev !== 'ok' && v.reply && (
               <div className="small">Likely continuation: {v.reply}</div>
             )}

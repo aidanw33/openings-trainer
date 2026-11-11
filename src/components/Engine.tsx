@@ -4,7 +4,7 @@ import { formatScore, numberedLine, pvToSan, type EngineLine } from '../lib/engi
 /** What the engine thinks of a non-repertoire move you tried in a drill. */
 export type MoveVerdict =
   | { id: number; tried: string; status: 'pending' }
-  | { id: number; tried: string; status: 'done'; loss: number; reply: string }
+  | { id: number; tried: string; status: 'done'; loss: number; reply: string; grade: string | null }
   | { id: number; tried: string; status: 'error' };
 
 export type Severity = 'ok' | 'meh' | 'bad';
@@ -55,7 +55,7 @@ export function EvalBar({ lines, orientation }: { lines: EngineLine[]; orientati
   );
 }
 
-export function EnginePanel({ fen, lines, hidden }: { fen: string; lines: EngineLine[]; hidden: boolean }) {
+export function EnginePanel({ fen, lines, hidden, onPreview }: { fen: string; lines: EngineLine[]; hidden: boolean; onPreview: (pv: string[]) => void }) {
   const game = new Chess(fen);
   return (
     <div className="card engine">
@@ -74,7 +74,7 @@ export function EnginePanel({ fen, lines, hidden }: { fen: string; lines: Engine
           {lines.map((l) => (
             <li key={l.multipv}>
               <span className="score">{formatScore(l)}</span>
-              <span>{numberedLine(fen, pvToSan(fen, l.pv, 8))}</span>
+              <button className="engine-variation" title="Preview this variation on the board" onClick={() => onPreview(l.pv)}>{numberedLine(fen, pvToSan(fen, l.pv, 8))}</button>
             </li>
           ))}
         </ol>

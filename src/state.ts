@@ -44,10 +44,13 @@ export interface Settings {
   guided: boolean;
   engine: boolean;
   level: number;
+  theme: 'dark' | 'light';
+  boardTheme: 'sage' | 'walnut' | 'slate';
+  muted: boolean;
 }
 
 export function loadSettings(): Settings {
-  const defaults: Settings = { opening: openings[0].id, chapters: {}, guided: false, engine: false, level: 2 };
+  const defaults: Settings = { opening: openings[0].id, chapters: {}, guided: false, engine: false, level: 2, theme: 'dark', boardTheme: 'sage', muted: false };
   try {
     const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
     if (!s || typeof s !== 'object') return defaults;
@@ -57,6 +60,10 @@ export function loadSettings(): Settings {
         ? s.chapters
         : {};
     return {
+      ...s,
+      theme: s.theme === 'light' ? 'light' : 'dark',
+      boardTheme: ['sage', 'walnut', 'slate'].includes(s.boardTheme) ? s.boardTheme : 'sage',
+      muted: !!s.muted,
       opening: REPERTOIRES.has(s.opening) ? s.opening : defaults.opening,
       chapters,
       guided: !!s.guided,

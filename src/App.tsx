@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Chess, type Square } from 'chess.js';
-import { Chessboard, type Arrow } from 'react-chessboard';
-import { openings } from './data/openings.ts';
+import { type Arrow } from 'react-chessboard';
 import { positionKey, type ParsedLine, type Repertoire } from './lib/repertoire.ts';
 import { getAnalysisEngine, getTaskEngine, numberedLine, pvToSan, type EngineLine } from './lib/engine.ts';
 import { loadProgress, mastery, pickNextLine, recordRun, resetLines, saveProgress, type Progress } from './lib/progress.ts';
 import { type Color } from './lib/notation.ts';
 import {
   LEVELS,
-  MODE_NAMES,
   REPERTOIRES,
   START_FEN,
   loadSettings,
@@ -24,6 +22,13 @@ import { EnginePanel, EvalBar, type MoveVerdict } from './components/Engine.tsx'
 import { DrillPanel, type Feedback } from './components/DrillPanel.tsx';
 import { ExplorePanel } from './components/ExplorePanel.tsx';
 import { PlayPanel, type PlayGame } from './components/PlayPanel.tsx';
+import { BoardControls } from './components/BoardControls.tsx';
+import { WorkspaceHeader } from './components/WorkspaceHeader.tsx';
+import { VariationPreview, type Preview } from './components/VariationPreview.tsx';
+import { TrainingBoard, type BoardBadge } from './components/TrainingBoard.tsx';
+import { PlayerBar } from './components/PlayerBar.tsx';
+import { playSound, moveSound } from './lib/sound.ts';
+import { AppearanceSettings } from './components/AppearanceSettings.tsx';
 import { Sidebar } from './components/Sidebar.tsx';
 
 const COMPUTER_DELAY = 650;
@@ -85,6 +90,10 @@ function Trainer({
   game: ExploreGame;
   setGame: Setter<ExploreGame>;
 }) {
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [playCursor, setPlayCursor] = useState<number | null>(null);
+  const [panelTab, setPanelTab] = useState<'coach' | 'lines' | 'settings'>('coach');
+  useEffect(() => { document.documentElement.dataset.theme = settings.theme; }, [settings.theme]);
   const myColor: Color = rep.opening.side === 'white' ? 'w' : 'b';
   const [progress, setProgress] = useState<Progress>(loadProgress);
   useEffect(() => saveProgress(progress), [progress]);
@@ -111,6 +120,8 @@ function Trainer({
   const missedThisMove = useRef(false);
   const [verdict, setVerdict] = useState<MoveVerdict | null>(null);
   /** Squares of the wrong move just tried, flashed red on the board for a moment. */
+  const [badge, setBadge] = useState<BoardBadge | null>(null);
+  const [sessionStreak, setSessionStreak] = useState(0);
   const [wrongMove, setWrongMove] = useState<{ from: string; to: string } | null>(null);
   useEffect(() => {
     if (!wrongMove) return;
@@ -122,6 +133,9 @@ function Trainer({
 
   const startLine = useCallback(
     (l: ParsedLine | undefined) => {
+      setPreview(null);
+      setBadge(null);
+      setWrongMove(null);
       setLine(l);
       setPly(0);
       setMistakes(0);
@@ -149,11 +163,12 @@ function Trainer({
   useEffect(() => {
     if (mode !== 'drill' || !expected || expected.color === myColor) return;
     const t = setTimeout(() => {
+      playSound(moveSound({ san: expected.san }), settings.muted);
       setPly((p) => p + 1);
       setShowOpponentIdea(false);
     }, COMPUTER_DELAY);
     return () => clearTimeout(t);
-  }, [mode, expected, myColor]);
+  }, [mode, expected, myColor, settings.muted]);
 
   // Record completion once.
   const recorded = useRef<string | null>(null);
@@ -164,7 +179,8 @@ function Trainer({
     recorded.current = tag;
     setProgress((p) => recordRun(p, line.id, mistakes));
     setFeedback({ kind: 'done', mistakes });
-  }, [line, lineDone, mistakes]);
+    playSound('complete', settings.muted);
+  }, [line, lineDone, mistakes, settings.muted]);
   useEffect(() => {
     if (ply === 0) recorded.current = null;
   }, [ply, line]);
@@ -181,7 +197,8 @@ function Trainer({
     Promise.all([
       eng.analyse(fen, { depth: 15, searchmoves: [triedUci] }),
       eng.analyse(fen, { depth: 15, searchmoves: [repUci] }),
-    ]).then(([a, b]) => {
+      eng.analyse(fen, { depth: 15 }),
+    ]).then(([a, b, best]) => {
       if (id !== verdictId.current) return;
       const la = a?.lines[0];
       const lb = b?.lines[0];
@@ -190,17 +207,21 @@ function Trainer({
         return;
       }
       const sign = fen.split(' ')[1] === 'w' ? 1 : -1;
-      setVerdict({ id, tried, status: 'done', loss: (lb.cp - la.cp) * sign, reply: numberedLine(fen, pvToSan(fen, la.pv, 5)) });
+      const bestLine = best?.lines[0];
+      const loss = bestLine ? Math.max(0, (bestLine.cp - la.cp) * sign) : null;
+      const grade = loss === null ? null : best?.bestmove === triedUci ? 'Best' : loss <= 30 ? 'Good' : loss <= 100 ? 'Inaccuracy' : loss <= 250 ? 'Mistake' : 'Blunder';
+      if (grade) setBadge(old => old ? { ...old, label: `${grade} · not your repertoire move`, tone: 'bad', symbol: '×', grade } : null);
+      setVerdict({ id, tried, status: 'done', grade, loss: (lb.cp - la.cp) * sign, reply: numberedLine(fen, pvToSan(fen, la.pv, 5)) });
     });
   };
 
-  const tryDrillMove = (from: string, to: string): boolean => {
+  const tryDrillMove = (from: string, to: string, promotion = 'q'): boolean => {
     if (!myTurn || !expected || !line) return false;
     const chess = new Chess(drillFen);
     let san: string;
     let uci: string;
     try {
-      const m = chess.move({ from, to, promotion: 'q' });
+      const m = chess.move({ from, to, promotion });
       san = m.san;
       uci = m.from + m.to + (m.promotion ?? '');
     } catch {
@@ -209,6 +230,9 @@ function Trainer({
     if (san === expected.san) {
       verdictId.current++;
       setVerdict(null);
+      setBadge({ square: to, label: 'Repertoire move', tone: 'good', symbol: '✓' });
+      setSessionStreak(n => n + 1);
+      playSound('correct', settings.muted);
       setFeedback({ kind: 'correct', move: expected, ply });
       setPly((p) => p + 1);
       setHintShown(false);
@@ -220,9 +244,12 @@ function Trainer({
       setMistakes((m) => m + 1);
     }
     setHintShown(false);
+    setSessionStreak(0);
+    playSound('incorrect', settings.muted);
+    setBadge({ square: to, label: 'Not your repertoire move', tone: 'bad', symbol: '×' });
     setWrongMove({ from, to });
     setFeedback((f) => ({ kind: 'wrong', tried: san, attempts: f.kind === 'wrong' ? f.attempts + 1 : 1 }));
-    checkMoveWithEngine(drillFen, uci, san, expected.from + expected.to);
+    checkMoveWithEngine(drillFen, uci, san, expected.from + expected.to + (expected.san.includes('=') ? expected.san.split('=')[1][0].toLowerCase() : ''));
     return false;
   };
 
@@ -231,6 +258,7 @@ function Trainer({
       missedThisMove.current = true;
       setMistakes((m) => m + 1);
     }
+    setSessionStreak(0);
     setHintShown(true);
   };
 
@@ -244,12 +272,12 @@ function Trainer({
   useEffect(() => {
     if (mode !== 'drill' || !line) return;
     const onKey = (e: KeyboardEvent) => {
-      if (isFormTarget(e) || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+      if (isFormTarget(e) || document.querySelector('dialog[open]') || (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key))) return;
       e.preventDefault();
       setSelected(null);
       setViewPly((v) => {
         const cur = v ?? ply;
-        const next = e.key === 'ArrowLeft' ? Math.max(0, cur - 1) : cur + 1;
+        const next = e.key === 'Home' ? 0 : e.key === 'End' ? ply : e.key === 'ArrowLeft' ? Math.max(0, cur - 1) : cur + 1;
         return next >= ply ? null : next;
       });
     };
@@ -270,6 +298,7 @@ function Trainer({
     const c = new Chess(exploreFen);
     try {
       const m = c.move(move);
+      playSound(moveSound(m), settings.muted);
       const next = { san: m.san, from: m.from, to: m.to, fen: c.fen() };
       setGame((g) =>
         g.moves[g.cursor]?.san === next.san
@@ -298,12 +327,12 @@ function Trainer({
   useEffect(() => {
     if (mode !== 'explore') return;
     const onKey = (e: KeyboardEvent) => {
-      if (isFormTarget(e) || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+      if (isFormTarget(e) || document.querySelector('dialog[open]') || (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key))) return;
       e.preventDefault();
       setSelected(null);
       setGame((g) => ({
         ...g,
-        cursor: e.key === 'ArrowLeft' ? Math.max(0, g.cursor - 1) : Math.min(g.moves.length, g.cursor + 1),
+        cursor: e.key === 'Home' ? 0 : e.key === 'End' ? g.moves.length : e.key === 'ArrowLeft' ? Math.max(0, g.cursor - 1) : Math.min(g.moves.length, g.cursor + 1),
       }));
     };
     window.addEventListener('keydown', onKey);
@@ -318,7 +347,11 @@ function Trainer({
   const [engineThinking, setEngineThinking] = useState(false);
 
   const startPlay = (fen: string, origin: string, returnTo: Mode) => {
-    setPlay({ startFen: fen, moves: [], origin, returnTo });
+    setPlayCursor(null);
+    setPreview(null);
+    const history = returnTo === 'explore' ? [START_FEN, ...game.moves.map(m => m.fen)] : [START_FEN, ...(line?.moves.map(m => m.fenAfter) ?? [])];
+    const at = history.indexOf(fen);
+    setPlay({ startFen: fen, moves: [], origin, returnTo, initialHistory: at >= 0 ? history.slice(0, at + 1) : [fen] });
     setSelected(null);
     setMode('play');
   };
@@ -327,6 +360,7 @@ function Trainer({
     const c = new Chess(playFen);
     try {
       const m = c.move({ from, to, promotion });
+      playSound(moveSound(m), settings.muted);
       const next: PlayMove = { san: m.san, from: m.from, to: m.to, fen: c.fen() };
       setPlay((p) => (p ? { ...p, moves: [...p.moves, next] } : p));
       return true;
@@ -365,37 +399,56 @@ function Trainer({
   }, [mode, playFen, playOver, settings.level]);
 
   // ----- Board wiring -----
-  const boardFen =
+  const positionFen =
     mode === 'explore'
       ? exploreFen
       : mode === 'play'
-        ? playFen
+        ? playCursor === null ? playFen : playCursor === 0 ? play?.startFen ?? START_FEN : play?.moves[playCursor - 1]?.fen ?? playFen
         : viewPly !== null && line
           ? viewPly === 0
             ? START_FEN
             : line.moves[viewPly - 1].fenAfter
           : drillFen;
 
+  const boardFen = preview ? preview.fens[preview.cursor] : positionFen;
+  useEffect(() => { setPreview(null); setSelected(null); }, [positionFen, mode]);
+  const previewLine = (pv: string[]) => {
+    const chess = new Chess(positionFen);
+    const fens = [positionFen]; const sans: string[] = [];
+    for (const u of pv.slice(0, 12)) {
+      try { const m = chess.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] }); sans.push(m.san); fens.push(chess.fen()); } catch { break; }
+    }
+    setSelected(null);
+    setPreview({ fens, sans, cursor: Math.min(1, sans.length) });
+  };
+
+  const captureHistory = useMemo(() => {
+    const history = mode === 'explore' ? [START_FEN, ...game.moves.slice(0, game.cursor).map(m => m.fen)]
+      : mode === 'play' && play ? [...(play.initialHistory ?? [play.startFen]), ...play.moves.slice(0, playCursor ?? play.moves.length).map(m => m.fen)]
+      : [START_FEN, ...(line?.moves.slice(0, viewPly ?? ply).map(m => m.fenAfter) ?? [])];
+    return preview ? [...history, ...preview.fens.slice(1, preview.cursor + 1)] : history;
+  }, [mode, game, play, playCursor, line, viewPly, ply, preview]);
+
   const lastMove =
     mode === 'explore'
       ? (game.moves[game.cursor - 1] ?? null)
       : mode === 'play'
-        ? (play?.moves[play.moves.length - 1] ?? null)
+        ? (play?.moves[(playCursor ?? play.moves.length) - 1] ?? null)
         : line && (viewPly ?? ply) > 0
           ? line.moves[(viewPly ?? ply) - 1]
           : null;
 
   const squareStyles: Record<string, React.CSSProperties> = {};
   if (lastMove) {
-    squareStyles[lastMove.from] = { background: 'var(--last-move)' };
-    squareStyles[lastMove.to] = { background: 'var(--last-move)' };
+    squareStyles[lastMove.from] = { backgroundColor: 'var(--last-move)' };
+    squareStyles[lastMove.to] = { backgroundColor: 'var(--last-move)' };
   }
   if (wrongMove && mode === 'drill') {
-    squareStyles[wrongMove.from] = { ...squareStyles[wrongMove.from], background: 'var(--wrong-sq)' };
-    squareStyles[wrongMove.to] = { ...squareStyles[wrongMove.to], background: 'var(--wrong-sq)' };
+    squareStyles[wrongMove.from] = { ...squareStyles[wrongMove.from], backgroundColor: 'var(--wrong-sq)' };
+    squareStyles[wrongMove.to] = { ...squareStyles[wrongMove.to], backgroundColor: 'var(--wrong-sq)' };
   }
   if (selected) {
-    squareStyles[selected] = { background: 'var(--selected)' };
+    squareStyles[selected] = { backgroundColor: 'var(--selected)' };
     for (const m of new Chess(boardFen).moves({ square: selected as Square, verbose: true })) {
       squareStyles[m.to] = {
         ...squareStyles[m.to],
@@ -427,20 +480,20 @@ function Trainer({
       return;
     }
     const eng = getAnalysisEngine();
-    setAnalysis({ fen: boardFen, lines: [] });
-    if (new Chess(boardFen).isGameOver()) {
+    setAnalysis({ fen: positionFen, lines: [] });
+    if (new Chess(positionFen).isGameOver()) {
       eng.cancelAll();
       return;
     }
-    eng.analyse(boardFen, { depth: 18, multipv: 3, onInfo: (lines) => setAnalysis({ fen: boardFen, lines }) }, true);
-  }, [boardFen, settings.engine]);
+    eng.analyse(positionFen, { depth: 18, multipv: 3, onInfo: (lines) => setAnalysis({ fen: positionFen, lines }) }, true);
+  }, [positionFen, settings.engine]);
   useEffect(() => {
     if (!settings.engine) getAnalysisEngine().cancelAll();
   }, [settings.engine]);
 
   // Don't let the engine give away the answer while you're being tested.
   const engineSpoiler = mode === 'drill' && myTurn;
-  const liveLines = analysis && analysis.fen === boardFen ? analysis.lines : [];
+  const liveLines = analysis && analysis.fen === positionFen ? analysis.lines : [];
   if (settings.engine && !engineSpoiler && liveLines[0]?.pv[0]) {
     const u = liveLines[0].pv[0];
     const [startSquare, endSquare] = [u.slice(0, 2), u.slice(2, 4)];
@@ -450,19 +503,20 @@ function Trainer({
       arrows.push({ startSquare, endSquare, color: ORANGE });
     }
   }
-  const enginePanel = settings.engine ? <EnginePanel fen={boardFen} lines={liveLines} hidden={engineSpoiler} /> : null;
+  const enginePanel = settings.engine ? <EnginePanel fen={positionFen} lines={liveLines} hidden={engineSpoiler} onPreview={previewLine} /> : null;
 
   const turnColor = boardFen.split(' ')[1];
-  const playerCanMove = mode === 'play' && !playOver && turnColor === myColor;
-  const canMovePieces = mode === 'explore' || myTurn || playerCanMove;
+  const playerCanMove = mode === 'play' && playCursor === null && !playOver && turnColor === myColor;
+  const canMovePieces = !preview && (mode === 'explore' || myTurn || playerCanMove);
   const otherSide = rep.opening.side === 'white' ? 'black' : 'white';
   const orientation = mode === 'explore' && flipped ? otherSide : rep.opening.side;
 
-  const tryMove = (from: string, to: string): boolean => {
+  const tryMove = (from: string, to: string, promotion = 'q'): boolean => {
     setSelected(null);
-    if (mode === 'drill') return tryDrillMove(from, to);
-    if (mode === 'play') return playerCanMove ? applyPlayMove(from, to) : false;
-    return applyExploreMove({ from, to, promotion: 'q' });
+    if (!canMovePieces) return false;
+    if (mode === 'drill') return tryDrillMove(from, to, promotion);
+    if (mode === 'play') return playerCanMove ? applyPlayMove(from, to, promotion) : false;
+    return applyExploreMove({ from, to, promotion });
   };
 
   const onSquareClick = ({ square, piece }: { square: string; piece: { pieceType: string } | null }) => {
@@ -477,6 +531,34 @@ function Trainer({
     }
     setSelected(ownPiece && selected !== square ? square : null);
   };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isFormTarget(e) || document.querySelector('dialog[open]')) return;
+      if (mode !== 'drill' || preview) return;
+      if (e.key.toLowerCase() === 'h' && myTurn && !hintShown) { e.preventDefault(); revealHint(); }
+      if (e.key.toLowerCase() === 'r' && line) { e.preventDefault(); startLine(line); }
+      if (e.key.toLowerCase() === 'n' && eligible.length) { e.preventDefault(); nextLine(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isFormTarget(e) || document.querySelector('dialog[open]')) return;
+      if (e.key === 'Escape' && preview) { setPreview(null); return; }
+      if (!['Home', 'End', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+      if (!preview && (mode !== 'play' || !play)) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      const max = preview ? preview.sans.length : play!.moves.length;
+      const cur = preview ? preview.cursor : playCursor ?? max;
+      const next = e.key === 'Home' ? 0 : e.key === 'End' ? max : Math.max(0, Math.min(max, cur + (e.key === 'ArrowLeft' ? -1 : 1)));
+      if (preview) setPreview({ ...preview, cursor: next }); else setPlayCursor(next === max ? null : next);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [preview, play, playCursor, mode]);
 
   // ----- Panels -----
   const chapter = line ? rep.chapterOf.get(line.id) : undefined;
@@ -494,63 +576,48 @@ function Trainer({
   };
   const hasProgress = rep.lines.some((l) => progress[l.id]);
 
-  const tabs: { id: Mode; label: string }[] = [
-    { id: 'drill', label: 'Drill' },
-    { id: 'explore', label: 'Explore' },
-    ...(play ? [{ id: 'play' as Mode, label: 'Play' }] : []),
-  ];
-
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <span className="logo" aria-hidden="true">
-            ♞
-          </span>
-          <div>
-            <h1>Openings Trainer</h1>
-            <p>
-              {totalKnown} of {rep.lines.length} lines mastered
-            </p>
-          </div>
-        </div>
-        <select
-          className="opening-picker"
-          aria-label="Opening to train"
-          value={rep.opening.id}
-          onChange={(e) => onSwitchOpening(e.target.value)}
-        >
-          {openings.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.name} · you play {o.side === 'white' ? 'White' : 'Black'}
-            </option>
-          ))}
-        </select>
-        <div className="tabs" role="tablist" aria-label="Mode">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              role="tab"
-              aria-selected={mode === t.id}
-              className={mode === t.id ? 'active' : ''}
-              onClick={() => setMode(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <label className="engine-toggle">
-          <input
-            type="checkbox"
-            checked={settings.engine}
-            onChange={(e) => setSettings((s) => ({ ...s, engine: e.target.checked }))}
-          />
-          Engine analysis
-        </label>
-      </header>
+    <div className="app" data-board={settings.boardTheme}>
+      <WorkspaceHeader mode={mode} settings={settings} setSettings={setSettings} totalKnown={totalKnown} total={rep.lines.length}
+        onOpening={onSwitchOpening} onSettings={() => setPanelTab('settings')}
+        onMode={m => { setPreview(null); if (m === 'play' && !play) startPlay(positionFen, 'Current position', mode); else setMode(m); setPanelTab('coach'); }} />
 
       <main className="layout">
-        <Sidebar
+
+
+        <section className="board-col">
+          {preview && <VariationPreview preview={preview} onStep={cursor => setPreview(p => p ? { ...p, cursor } : null)} onClose={() => setPreview(null)} />}
+          <PlayerBar history={captureHistory} fen={boardFen} color={orientation === 'white' ? 'b' : 'w'} mine={orientation !== rep.opening.side} mode={mode} />
+          <div className="board-row">
+            <div className={`eval-slot ${settings.engine ? 'enabled' : ''}`}><EvalBar lines={liveLines} orientation={orientation} /></div>
+            <div className="board-wrap">
+              <TrainingBoard fen={boardFen} orientation={orientation}
+                badge={mode === 'drill' && viewPly === null && !preview ? badge : null} contextKey={mode + (line?.id ?? '')}
+                onMove={tryMove} options={{ squareStyles: preview ? {} : squareStyles, arrows: preview ? [] : arrows, allowDragging: canMovePieces,
+                  allowDrawingArrows: true, clearArrowsOnPositionChange: true,
+                  canDragPiece: ({ piece }) => canMovePieces && piece.pieceType[0] === turnColor,
+                  onSquareClick,
+                  lightSquareStyle: { backgroundColor: 'var(--light-sq)' },
+                  darkSquareStyle: { backgroundColor: 'var(--dark-sq)' },
+                }} />
+            </div>
+          </div>
+
+          <PlayerBar history={captureHistory} fen={boardFen} color={orientation === 'white' ? 'w' : 'b'} mine={orientation === rep.opening.side} mode={mode} />
+          <BoardControls mode={mode} myTurn={myTurn && !preview} hintShown={hintShown} lineDone={lineDone} hasLine={!!line} hasEligible={!!eligible.length}
+            onHint={revealHint} onRetry={() => startLine(line)} onNext={nextLine}
+            cursor={game.cursor} length={game.moves.length} onJump={jumpExplore} onFlip={() => setFlipped(f => !f)}
+            onPlay={() => startPlay(exploreFen, 'Explore position', 'explore')}
+            canUndo={!!play?.moves.length && !engineThinking} canRestart={!!play?.moves.length}
+            onUndo={() => { setPlayCursor(null); undoPlay(); }} onRestart={() => { setPlayCursor(null); if (play) setPlay({ ...play, moves: [] }); }}
+            onBack={() => setMode(play?.returnTo ?? 'drill')} returnTo={play?.returnTo ?? 'drill'} />
+        </section>
+
+        <section className="panel">
+          <div className="panel-tabs" role="tablist" aria-label="Side panel">
+            {(['coach', 'lines', 'settings'] as const).map((t) => <button key={t} role="tab" aria-selected={panelTab === t} onClick={() => setPanelTab(t)}>{t === 'coach' ? (mode === 'drill' ? 'Lesson' : 'Analysis') : t === 'lines' ? 'Variations' : 'Settings'}</button>)}
+          </div>
+          {panelTab === 'lines' && <div className="panel-body">        <Sidebar
           rep={rep}
           mode={mode}
           myColor={myColor}
@@ -561,104 +628,16 @@ function Trainer({
           onToggleOpen={toggleOpen}
           currentLineId={mode === 'explore' ? game.lineId : line?.id}
           maskCurrent={mode === 'drill' && !lineDone}
-          onLine={(l) => (mode === 'explore' ? loadLineInExplore(l) : startLine(l))}
+          onLine={(l) => { mode === 'explore' ? loadLineInExplore(l) : startLine(l); setPanelTab('coach'); }}
           guided={settings.guided}
           onGuided={(guided) => setSettings((s) => ({ ...s, guided }))}
-        />
-
-        <section className="board-col">
-          <div className="board-row">
-            {settings.engine && <EvalBar lines={liveLines} orientation={orientation} />}
-            <div className="board-wrap">
-              <Chessboard
-                options={{
-                  position: boardFen,
-                  boardOrientation: orientation,
-                  squareStyles,
-                  arrows,
-                  allowDrawingArrows: true,
-                  clearArrowsOnPositionChange: true,
-                  animationDurationInMs: 200,
-                  canDragPiece: ({ piece }) => canMovePieces && piece.pieceType[0] === turnColor,
-                  onPieceDrop: ({ sourceSquare, targetSquare }) =>
-                    targetSquare ? tryMove(sourceSquare, targetSquare) : false,
-                  onSquareClick,
-                  lightSquareStyle: { backgroundColor: 'var(--light-sq)' },
-                  darkSquareStyle: { backgroundColor: 'var(--dark-sq)' },
-                }}
-              />
-            </div>
-          </div>
-
-          {mode === 'play' ? (
-            <div className="controls">
-              <button onClick={undoPlay} disabled={!play?.moves.length || engineThinking}>
-                ↶ Undo
-              </button>
-              <button onClick={() => play && setPlay({ ...play, moves: [] })} disabled={!play?.moves.length}>
-                Restart
-              </button>
-              <button className="primary" onClick={() => setMode(play?.returnTo ?? 'drill')}>
-                Back to {MODE_NAMES[play?.returnTo ?? 'drill']}
-              </button>
-            </div>
-          ) : mode === 'explore' ? (
-            <div className="controls">
-              <div className="button-group" role="group" aria-label="Step through the game">
-                <button onClick={() => jumpExplore(0)} disabled={game.cursor === 0} aria-label="Start" title="Start">
-                  ⏮
-                </button>
-                <button
-                  onClick={() => jumpExplore(game.cursor - 1)}
-                  disabled={game.cursor === 0}
-                  aria-label="Back one move"
-                  title="Back (←)"
-                >
-                  ◀
-                </button>
-                <button
-                  onClick={() => jumpExplore(game.cursor + 1)}
-                  disabled={game.cursor >= game.moves.length}
-                  aria-label="Forward one move"
-                  title="Forward (→)"
-                >
-                  ▶
-                </button>
-                <button
-                  onClick={() => jumpExplore(game.moves.length)}
-                  disabled={game.cursor >= game.moves.length}
-                  aria-label="Last move"
-                  title="Last move"
-                >
-                  ⏭
-                </button>
-              </div>
-              <button onClick={() => setFlipped((f) => !f)} title="View the board from the other side">
-                ⇅ Flip
-              </button>
-              <button className="primary" onClick={() => startPlay(exploreFen, 'Explore position', 'explore')}>
-                Play from here vs engine
-              </button>
-            </div>
-          ) : (
-            <div className="controls">
-              <button onClick={revealHint} disabled={!myTurn || hintShown} title="Show the move (counts as a mistake)">
-                Hint
-              </button>
-              <button onClick={() => startLine(line)} disabled={!line}>
-                Restart line
-              </button>
-              <button className="primary" onClick={nextLine} disabled={!eligible.length}>
-                Next line →
-              </button>
-            </div>
-          )}
-        </section>
-
-        <section className="panel" aria-live="polite">
+        /></div>}
+          {panelTab === 'settings' && <AppearanceSettings settings={settings} onChange={setSettings} />}
+          <div className="panel-body" hidden={panelTab !== 'coach'} aria-live="polite">
           {mode === 'drill' ? (
             line ? (
               <DrillPanel
+                sessionStreak={sessionStreak}
                 line={line}
                 chapter={chapter}
                 myColor={myColor}
@@ -688,6 +667,8 @@ function Trainer({
             )
           ) : mode === 'play' && play ? (
             <PlayPanel
+              cursor={playCursor ?? play.moves.length}
+              onJump={n => { setSelected(null); setPlayCursor(n === play.moves.length ? null : n); }}
               myColor={myColor}
               play={play}
               game={playGame}
@@ -706,6 +687,7 @@ function Trainer({
               engine={enginePanel}
             />
           )}
+          </div>
         </section>
       </main>
 

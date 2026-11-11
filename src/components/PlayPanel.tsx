@@ -1,15 +1,19 @@
 import type { ReactNode } from 'react';
 import type { Chess } from 'chess.js';
 import type { Color } from '../lib/notation.ts';
+import { MoveList } from './MoveList.tsx';
 import { LEVELS, type PlayMove } from '../state.ts';
 
 export interface PlayGame {
   startFen: string;
+  initialHistory: string[];
   moves: PlayMove[];
   origin: string;
 }
 
 export function PlayPanel(props: {
+  cursor: number;
+  onJump: (n: number) => void;
   myColor: Color;
   play: PlayGame;
   game: Chess;
@@ -34,9 +38,6 @@ export function PlayPanel(props: {
     status = thinking ? 'Stockfish is thinking…' : 'Stockfish to move.';
     cls = 'muted-status';
   }
-  const startParts = play.startFen.split(' ');
-  const firstNo = Number(startParts[5]);
-  const startsWhite = startParts[1] === 'w';
   return (
     <>
       <div className="line-title">
@@ -56,25 +57,8 @@ export function PlayPanel(props: {
           ))}
         </select>
       </label>
-      <div className="movelist play-moves">
-        {play.moves.length === 0 ? (
-          <span className="muted small">Your game against the engine will appear here.</span>
-        ) : (
-          <p>
-            {play.moves.map((m, i) => {
-              const whiteMove = (i % 2 === 0) === startsWhite;
-              const n = firstNo + Math.floor((i + (startsWhite ? 0 : 1)) / 2);
-              const prefix = whiteMove ? `${n}. ` : i === 0 ? `${n}... ` : '';
-              return (
-                <span key={i} className="pm">
-                  {prefix}
-                  {m.san}{' '}
-                </span>
-              );
-            })}
-          </p>
-        )}
-      </div>
+      {props.cursor < play.moves.length && <div className="status info">Reviewing move {props.cursor}. <button className="link" onClick={() => props.onJump(play.moves.length)}>Return to live game</button></div>}
+      <MoveList sans={play.moves.map(m => m.san)} startFen={play.startFen} current={props.cursor} onJump={props.onJump} empty="Your game against the engine will appear here." />
       {props.engine}
       <p className="muted small help">
         Try to carry out the plans from the line’s key ideas. Undo takes back your last move, and Engine analysis shows how

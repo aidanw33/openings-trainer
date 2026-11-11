@@ -44,7 +44,21 @@ export function recordRun(p: Progress, lineId: string, mistakes: number): Progre
   };
 }
 
+/** Forget the stats for these lines, e.g. every line of one opening. */
+export function resetLines(p: Progress, lineIds: string[]): Progress {
+  const next = { ...p };
+  for (const id of lineIds) delete next[id];
+  return next;
+}
+
 export type Mastery = 'new' | 'learning' | 'shaky' | 'known';
+
+export const MASTERY_LABELS: Record<Mastery, string> = {
+  new: 'New',
+  shaky: 'Mistakes last time',
+  learning: 'Learning',
+  known: 'Mastered (3 clean runs in a row)',
+};
 
 export function mastery(s: LineStats | undefined): Mastery {
   if (!s) return 'new';

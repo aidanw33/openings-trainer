@@ -33,16 +33,53 @@ Then open http://localhost:5173.
 - **Explore**: move the pieces for both sides, any legal move, or click one of the suggested moves.
   After every move the panel shows what the current opening's repertoire recommends from that position, with the explanation and the lines it belongs to.
   Transpositions are recognised, and when the game leaves the repertoire the panel says where and what was prepared instead.
-  Click a line in the sidebar to load it onto the board and step through it.
+  Click a line in the Variations tab to load it onto the board and step through it.
   Use the arrow buttons or the ← and → keys to step through the game, and Flip to view it from the other side.
   Switching openings keeps the game, so you can check the same moves against the other repertoire.
-- **Variations sidebar**: tick chapters to include them in drills (All and None tick or untick every chapter), or click a single line to practise it.
+- **Variations tab**: tick chapters to include them in drills (All and None tick or untick every chapter), or click a single line to practise it.
   Each opening remembers its own ticked chapters.
   The dots show mastery.
   A line counts as mastered after three clean runs in a row.
 - **Guided drills** show an arrow for every move, which helps on a first pass through new lines.
 - Progress and settings are saved in your browser's localStorage.
   **Reset progress** in the footer clears the progress for the current opening.
+
+## Board and workspace
+
+The board sits between a navigation rail and one tabbed panel for the lesson, variations, and settings.
+On phones the board is full width, the panel follows below it, and the action bar stays at the bottom.
+Dark is the default appearance, with a saved Light option in Settings.
+Choose Sage, Walnut, or Slate boards in Settings.
+The original react-chessboard pieces are retained on the board, in player bars, and in the promotion picker.
+The react-chessboard package is MIT-licensed; this update adds no third-party artwork.
+The synthesized Web Audio cues are original, with distinct sounds for moves, captures, check, castling, correct and incorrect answers, and completion.
+Use the music-note toggle or Settings to mute sounds; the choice persists across visits.
+Player bars identify each side, show captured pieces, and show positive material advantages using pawn = 1, knight/bishop = 3, rook = 5, and queen = 9.
+Click a piece for legal-move dots, or drag it with a lifted shadow.
+Right-drag to draw arrows and right-click to mark squares; annotations clear when the position changes.
+Promoting a pawn opens a keyboard-accessible picker for queen, rook, bishop, or knight, and Escape cancels it.
+
+Drills show a line progress bar, a session streak of correct moves, and progress toward three clean runs for mastery.
+Wrong moves and hints reset the session streak.
+The coach bubble explains the move, including the final move of a completed line.
+A green destination badge marks the repertoire move and a red cross marks a rejected alternative.
+Stockfish additionally grades alternatives as Best, Good, Inaccuracy, Mistake, or Blunder against its unrestricted depth-15 search, while the explanation retains the comparison against the repertoire move.
+These grades are approximate engine feedback, not a claim of exhaustive analysis.
+Use H for Hint, R for Retry, and N for the next line; shortcuts are also shown in tooltips.
+
+Explore and Play use clickable two-column figurine move lists.
+Left/Right and Home/End review positions in all modes.
+In Play, return to the live position before making another move.
+Click an engine variation to preview it on the main board, use its arrow buttons or keyboard navigation to step through it, and Close or Escape to return without modifying the game.
+Engine lines remain hidden on your live drill turn.
+The evaluation bar reserves its own space and does not resize the board when toggled.
+Existing progress and per-opening chapter choices keep their original localStorage keys, and older settings gain appearance defaults without deleting saved values.
+
+To run focused UI regression checks without a browser:
+
+```bash
+node --import tsx scripts/ui-regressions.tsx
+```
 
 ## Engine (Stockfish)
 
